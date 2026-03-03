@@ -1,0 +1,27 @@
+{
+  "name": "loca",
+  "version": "0.3.0",
+  "description": "Local Coding Agent — autonomous coding via any Ollama model",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.5.2",
+    "chalk": "^5.4.1",
+    "diff": "^7.0.0",
+    "ignore": "^6.0.2",
+    "smol-toml": "^1.3.1",
+    "undici": "^7.3.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
