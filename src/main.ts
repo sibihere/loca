@@ -122,7 +122,11 @@ async function initProxy(config: Config): Promise<void> {
   if (saved?.enabled && saved.url) {
     if (saved.username) {
       console.log(chalk.yellow(`\n  Proxy configured (${saved.url}) — password required each session.`));
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: process.platform !== "win32",
+      });
       const password = await new Promise<string>((resolve) => {
         rl.question(chalk.dim(`  Proxy password for ${saved.username}: `), (ans) => {
           rl.close(); resolve(ans);
@@ -181,6 +185,7 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
     input: process.stdin,
     output: process.stdout,
     prompt: chalk.bold.green("  you ▸ "),
+    terminal: process.platform !== "win32",
   });
 
   rl.prompt();
@@ -197,7 +202,7 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
 
     rl.pause();
     try {
-      await agent.run(input);
+      await agent.run(input, rl);
     } catch (err: unknown) {
       console.error(chalk.red(`\n  Unexpected error: ${err instanceof Error ? err.message : String(err)}`));
     }

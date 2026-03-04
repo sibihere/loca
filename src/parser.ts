@@ -35,6 +35,30 @@ function extractTag(xml: string, tag: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+// ─── Extract tag content handling potential nested false-positives ────────────
+// Finds the LAST closing tag to handle content that contains </tag> literally
+
+function extractTagRobust(xml: string, tag: string): string | undefined {
+  const openRe = new RegExp(`<${tag}(?:\\s[^>]*)?>`, "gi");
+  const closeRe = new RegExp(`</${tag}>`, "gi");
+  
+  const openMatch = openRe.exec(xml);
+  if (!openMatch) return undefined;
+  
+  const openIndex = openMatch.index + openMatch[0].length;
+  
+  // Find all closing tags and use the last one
+  let lastCloseIndex = -1;
+  let closeMatch: RegExpExecArray | null;
+  while ((closeMatch = closeRe.exec(xml)) !== null) {
+    lastCloseIndex = closeMatch.index;
+  }
+  
+  if (lastCloseIndex === -1 || lastCloseIndex <= openIndex) return undefined;
+  
+  return xml.slice(openIndex, lastCloseIndex).trim();
+}
+
 // ─── Parse ────────────────────────────────────────────────────────────────────
 
 export function parseToolCall(text: string): ToolCall | "done" | null {
@@ -73,7 +97,17 @@ export function parseToolCall(text: string): ToolCall | "done" | null {
   while ((match = tagRe.exec(inner)) !== null) {
     const tagName = match[1].toLowerCase();
     if (tagName !== "n") {
-      params[tagName] = match[2].trim();
+      // For 'content' param, use robust extraction to handle </content> in content
+      if (tagName === "content") {
+        const robustContent = extractTagRobust(inner, "content");
+        if (robustContent !== undefined) {
+          params[tagName] = robustContent;
+        } else {
+          params[tagName] = match[2].trim();
+        }
+      } else {
+        params[tagName] = match[2].trim();
+      }
     }
   }
 
@@ -83,5 +117,11 @@ export function parseToolCall(text: string): ToolCall | "done" | null {
 // ─── Check if LLM text contains a complete tool call ──────────────────────────
 
 export function hasToolCall(text: string): boolean {
-  return /<tool[^>]*>[\s\S]*?<\/tool>/i.test(text) || /<done\s*\/?>/i.test(text);
+  // Check for complete tool block with closing tag
+  if (/<tool[^>]*>[\s\S]*?<\/tool>/i.test(text)) return true;
+  // Check for self-closing tool tag (malformed but detectable)
+  if (/<tool\s*\/>/i.test(text)) return true;
+  // Check for done tag
+  if (/<done\s*\/?>/i.test(text)) return true;
+  return false;
 }

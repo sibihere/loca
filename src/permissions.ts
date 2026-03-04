@@ -111,34 +111,33 @@ function persistUndoEntry(entry: UndoEntry): void {
 
 // ─── Permission gate ──────────────────────────────────────────────────────────
 
-export async function askPermission(call: ToolCall): Promise<PermissionResult> {
+export async function askPermission(call: ToolCall, rl?: readline.Interface): Promise<PermissionResult> {
   console.log();
   renderPreview(call);
 
   while (true) {
     const answer = await promptUser(
       chalk.dim("  [y] Approve  [n] Reject  [e] Edit first  [s] Stop agent\n") +
-      chalk.bold("  > ")
+      chalk.bold("  > "),
+      rl
     );
 
-    switch (answer.toLowerCase().trim()) {
+    // Take only the first character to handle buffered extra keystrokes
+    const firstChar = answer.trim().charAt(0).toLowerCase();
+
+    switch (firstChar) {
       case "y":
-      case "yes":
-      case "":
         return { decision: "approved" };
 
       case "n":
-      case "no":
         console.log(chalk.dim("  ✗ Rejected.\n"));
         return { decision: "rejected" };
 
       case "s":
-      case "stop":
         console.log(chalk.dim("  ⏹ Agent stopped.\n"));
         return { decision: "stop" };
 
-      case "e":
-      case "edit": {
+      case "e": {
         const edited = await openInEditor(call);
         if (edited) {
           return {
@@ -151,6 +150,10 @@ export async function askPermission(call: ToolCall): Promise<PermissionResult> {
         renderPreview(call);
         break;
       }
+
+      case "":
+        // Empty input - treat as approve (user just pressed Enter)
+        return { decision: "approved" };
 
       default:
         console.log(chalk.yellow("  Please type y, n, e, or s."));
@@ -349,12 +352,28 @@ function getFileExt(filePath: string): string {
 
 // ─── Simple stdin prompt ──────────────────────────────────────────────────────
 
-function promptUser(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
+async function promptUser(prompt: string, rl?: readline.Interface): Promise<string> {
+  if (rl) {
+    // Use the provided readline interface (from main REPL)
+    return new Promise((resolve) => {
+      rl.question(prompt, (answer) => {
+        resolve(answer.trim());
+      });
     });
-  });
+  } else {
+    // Create a temporary readline interface
+    // On Windows, use terminal:false to avoid double-echo
+    return new Promise((resolve) => {
+      const tempRl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: process.platform !== "win32",
+        crlfDelay: Infinity,
+      });
+      tempRl.question(prompt, (answer) => {
+        tempRl.close();
+        resolve(answer.trim());
+      });
+    });
+  }
 }

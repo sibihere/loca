@@ -50,6 +50,11 @@ write_file(path, content)
 
 edit_file(path, diff)
   Apply a unified diff to an existing file. Requires user approval.
+  IMPORTANT: The diff must exactly match the current file content.
+  - First read_file to see the exact current content
+  - Include ALL context lines around your changes (at least 3 lines before/after)
+  - Preserve exact whitespace, indentation, and line endings
+  - The @@ line format is: @@ -start,count +start,count @@
   Example:
   <tool>
     <n>edit_file</n>

@@ -4,6 +4,7 @@
 
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import chalk from "chalk";
 import { streamChat, type Message, type OllamaOptions } from "./ollama.js";
 import { parseToolCall, hasToolCall } from "./parser.js";
@@ -209,11 +210,11 @@ export class Agent {
 
   // ─── Public: send a user message, run loop ────────────────────────────────
 
-  async run(userMessage: string): Promise<void> {
+  async run(userMessage: string, rl?: readline.Interface): Promise<void> {
     this.history.push({ role: "user", content: userMessage });
     this.retryCount = 0;
     this.checkTokenWarning();
-    await this.loop();
+    await this.loop(rl);
   }
 
   // ─── Token warning + context compression ─────────────────────────────────
@@ -259,18 +260,31 @@ export class Agent {
 
   // ─── Main ReAct loop ──────────────────────────────────────────────────────
 
-  private async loop(): Promise<void> {
+  private async loop(rl?: readline.Interface): Promise<void> {
     while (true) {
       // ── Stream LLM response ──────────────────────────────────────────
       let fullResponse = "";
-      let insideToolBlock = false;
+      let toolBlockDepth = 0;  // Track nested tool/done blocks
+      let thinkingDepth = 0;   // Track <think> blocks
       process.stdout.write(chalk.bold.cyan("\n  loca ▸ "));
 
       try {
         fullResponse = await streamChat(this.opts, this.history, (token) => {
-          if (token.includes("<tool>")) insideToolBlock = true;
-          if (!insideToolBlock) process.stdout.write(chalk.white(token));
-          if (token.includes("</tool>") || token.includes("<done")) insideToolBlock = false;
+          // Count opening and closing tags to track depth
+          const openTool = (token.match(/<tool[^>]*>/gi) || []).length;
+          const closeTool = (token.match(/<\/tool>/gi) || []).length;
+          const openDone = (token.match(/<done/gi) || []).length;
+          const closeDone = (token.match(/<\/done>/gi) || []).length;
+          const openThink = (token.match(/<think>/gi) || []).length;
+          const closeThink = (token.match(/<\/think>/gi) || []).length;
+
+          toolBlockDepth += openTool + openDone - closeTool - closeDone;
+          thinkingDepth += openThink - closeThink;
+
+          // Only print if we're not inside any tool/done/thinking block
+          if (toolBlockDepth <= 0 && thinkingDepth <= 0) {
+            process.stdout.write(chalk.white(token));
+          }
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -296,6 +310,11 @@ export class Agent {
           console.log(chalk.yellow(`\n  ⚠ Retrying (${this.retryCount}/${MAX_RETRIES})...`));
           continue;
         }
+        // Max retries exceeded - show error and stop
+        console.log(chalk.red(`\n  ✗ Could not parse tool block after ${MAX_RETRIES} attempts.`));
+        console.log(chalk.dim("  The LLM may have output malformed XML. Try again or check the model output."));
+        this.history.push({ role: "assistant", content: fullResponse });
+        return;
       }
 
       this.retryCount = 0;
@@ -338,7 +357,7 @@ export class Agent {
       if (this.autoApprove) {
         console.log(chalk.yellow("  ⚡ Auto-approved"));
       } else {
-        const result = await askPermission(parsed);
+        const result = await askPermission(parsed, rl);
         decision = result.decision;
         editedParams = result.editedParams;
       }

@@ -136,22 +136,82 @@ export function editFile(filePath: string, diff: string): string {
     return `Error reading file for edit: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  // applyPatch returns false if the diff doesn't apply cleanly
-  const result = applyPatch(original, diff);
+  // Detect original line endings
+  const hasCRLF = original.includes("\r\n");
 
-  if (result === false) {
-    return (
-      "Error: Diff did not apply cleanly. This usually means the context lines in the diff " +
-      "don't match the file's current content. Please read_file first and regenerate the diff."
-    );
-  }
+  // Normalize both to LF for patching (diff package expects LF)
+  const normalizedOriginal = hasCRLF ? original.replace(/\r\n/g, "\n") : original;
+  const normalizedDiff = recalibrateDiff(diff.replace(/\r\n/g, "\n"));
 
   try {
-    fs.writeFileSync(resolved, result, "utf-8");
+    const result = applyPatch(normalizedOriginal, normalizedDiff);
+
+    if (result === false) {
+      return (
+        `Error: Diff did not apply cleanly to ${filePath}. ` +
+        `This usually means the file content has changed since the diff was generated. ` +
+        `Please read_file first to see the current content, then regenerate the diff.`
+      );
+    }
+
+    // Restore original line endings
+    const finalResult = hasCRLF ? result.replace(/\n/g, "\r\n") : result;
+
+    fs.writeFileSync(resolved, finalResult, "utf-8");
     return `Edited: ${filePath}`;
   } catch (err: unknown) {
-    return `Error writing edited file: ${err instanceof Error ? err.message : String(err)}`;
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error applying diff: ${msg}. Check that the hunk header (@@ line) has correct line counts.`;
   }
+}
+
+/**
+ * Recalibrates the line counts in a unified diff hunk header (@@ -start,count +start,count @@).
+ * LLMs often get these counts wrong, which causes applyPatch to fail.
+ */
+function recalibrateDiff(diff: string): string {
+  const lines = diff.split("\n");
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith("@@")) {
+      // Parse header: @@ -oldStart,oldCount +newStart,newCount @@
+      const match = line.match(/^@@ -(\d+),?\d* \+(\d+),?\d* @@(.*)$/);
+      if (match) {
+        const oldStart = parseInt(match[1], 10);
+        const newStart = parseInt(match[2], 10);
+        const rest = match[3];
+
+        let oldCount = 0;
+        let newCount = 0;
+
+        // Count lines in this hunk
+        let j = i + 1;
+        while (j < lines.length && !lines[j].startsWith("@@")) {
+          const hunkLine = lines[j];
+          if (hunkLine.startsWith(" ")) {
+            oldCount++;
+            newCount++;
+          } else if (hunkLine.startsWith("-")) {
+            oldCount++;
+          } else if (hunkLine.startsWith("+")) {
+            newCount++;
+          } else {
+            // Unexpected content in hunk? Skip or break.
+            // Some diffs might have \ No newline messages, etc.
+          }
+          j++;
+        }
+
+        result.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@${rest}`);
+        continue;
+      }
+    }
+    result.push(line);
+  }
+
+  return result.join("\n");
 }
 
 // ─── delete_file ──────────────────────────────────────────────────────────────
