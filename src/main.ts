@@ -9,6 +9,7 @@ import { loadConfig, clearConfig, loadProjectConfig, type Config } from "./confi
 import { runWizard, runProxyWizard } from "./wizard.js";
 import { Agent } from "./agent.js";
 import { listModels } from "./ollama.js";
+import { search } from "@inquirer/prompts";
 import {
   applyProxy, clearProxy, printProxyStatus, proxyFromEnv, type ProxyConfig,
 } from "./proxy.js";
@@ -62,7 +63,7 @@ function parseArgs(argv: string[]): CliArgs {
 
 function printHelp(): void {
   console.log(`
-${chalk.bold.cyan("loca")} — Local Coding Agent  v0.3
+${chalk.bold.cyan("loca")} — Local Coding Agent  v0.3.5
 
 ${chalk.bold("Usage:")}
   npm start                            Launch (wizard on first run, saved config after)
@@ -145,6 +146,51 @@ async function initProxy(config: Config): Promise<void> {
 
 // ─── REPL ─────────────────────────────────────────────────────────────────────
 
+const SLASH_COMMANDS = [
+  "/connect",
+  "/model",
+  "/context",
+  "/map",
+  "/map rebuild",
+  "/map budget",
+  "/map off",
+  "/map on",
+  "/auto",
+  "/session",
+  "/session save",
+  "/session list",
+  "/session load",
+  "/session clear",
+  "/proxy",
+  "/proxy set",
+  "/proxy auth",
+  "/proxy off",
+  "/proxy on",
+  "/undo",
+  "/clear",
+  "/status",
+  "/help",
+  "/exit",
+  "/quit",
+];
+
+async function pickCommand(): Promise<string | null> {
+  try {
+    return await search({
+      message: "Select command",
+      source: async (term) => {
+        const input = (term || "").trim();
+        // If the user types 's', we want it to match '/status'
+        const searchFor = input.startsWith("/") ? input : "/" + input;
+        const hits = SLASH_COMMANDS.filter((c) => c.startsWith(searchFor));
+        return hits.map((c) => ({ value: c, name: c }));
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function startRepl(config: Config, args: CliArgs): Promise<void> {
   await initProxy(config);
 
@@ -182,23 +228,30 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
     chalk.bold("  ✓") +
     chalk.dim(` ${config.connection.host}`) +
     chalk.dim("  |  ") + chalk.dim(config.connection.serverType) +
-    chalk.dim("  |  ") + chalk.cyan(config.connection.model)
+    chalk.dim("  |  ") + chalk.cyan(config.connection.model) +
+    chalk.dim("  |  ") + chalk.yellow("v0.3.5")
   );
   if (args.auto) console.log(chalk.yellow("  ⚡ Auto-approve is ON"));
   console.log(chalk.dim("  Type a task, or /help for commands. Ctrl+C to quit.\n"));
+
+  readline.emitKeypressEvents(process.stdin);
+  if (process.stdin.isTTY && !process.stdin.isPaused()) {
+    process.stdin.setRawMode(true);
+  }
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: chalk.bold.green("  you ▸ "),
-    terminal: process.platform !== "win32",
+    terminal: true,
   });
 
-  rl.prompt();
-
-  rl.on("line", async (line) => {
+  const handleInput = async (line: string) => {
     const input = line.trim();
-    if (!input) { rl.prompt(); return; }
+    if (!input) {
+      rl.prompt();
+      return;
+    }
 
     if (input.startsWith("/")) {
       await handleCommand(input, config, agent, rl, args);
@@ -210,17 +263,81 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
     try {
       await agent.run(input, rl);
     } catch (err: unknown) {
-      console.error(chalk.red(`\n  Unexpected error: ${err instanceof Error ? err.message : String(err)}`));
+      console.error(
+        chalk.red(
+          `\n  Unexpected error: ${err instanceof Error ? err.message : String(err)}`
+        )
+      );
     }
     rl.resume();
     rl.prompt();
-  });
+  };
+
+  // Live autocomplete trigger
+  let isPicking = false;
+  const keypressHandler = async (str: string, key: any) => {
+    if (isPicking) return;
+
+    // Check if the user typed '/' at the start of an empty line (or if rl already swallowed it)
+    if (
+      (str === "/" || (key && key.sequence === "/")) &&
+      (rl.line === "" || rl.line === "/")
+    ) {
+      isPicking = true;
+      // Pause current interface to let Inquirer take over
+      rl.pause();
+      // Clear the current line (the '/' itself if it was already echoed)
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+
+      try {
+        const selected = await pickCommand();
+
+        // Restore terminal state after Inquirer finishes
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+        }
+        process.stdin.resume();
+
+        if (selected) {
+          // Clear internal line buffer so the '/' isn't executed
+          (rl as any).line = "";
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+
+          console.log(`${chalk.bold.green("  you ▸ ")}${selected}`);
+          await handleInput(selected);
+        }
+      } finally {
+        isPicking = false;
+        rl.resume();
+        rl.prompt();
+      }
+    }
+  };
+
+  process.stdin.on("keypress", keypressHandler);
+
+  rl.prompt();
+
+  rl.on("line", handleInput);
+
+  // Keep-alive to prevent event loop exhaustion if stdin is temporarily paused
+  const keepAlive = setInterval(() => { }, 1000000);
 
   rl.on("close", () => {
+    clearInterval(keepAlive);
+    process.stdin.removeListener("keypress", keypressHandler);
+    if ((rl as any).isRestarting) return;
+
     // Auto-save session on clean exit if there's anything to save
     const history = agent.getHistory();
     if (history.filter((m) => m.role !== "system").length > 0) {
-      const file = saveSession(history, config.connection.model, config.connection.host);
+      const file = saveSession(
+        history,
+        config.connection.model,
+        config.connection.host
+      );
       console.log(chalk.dim(`\n  Session saved: ${path.basename(file)}`));
     }
     console.log(chalk.dim("  Bye!\n"));
@@ -310,6 +427,7 @@ async function handleCommand(
       break;
 
     case "connect":
+      (rl as any).isRestarting = true;
       rl.close();
       const newConfig = await runWizard();
       startRepl(newConfig, args);
@@ -518,4 +636,16 @@ async function main(): Promise<void> {
 main().catch((err) => {
   console.error(chalk.red("Fatal error:"), err);
   process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error(chalk.red("\n  Uncaught Exception:"), err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error(chalk.red("\n  Unhandled Rejection:"), reason);
+});
+
+process.on("exit", (code) => {
+  console.log(chalk.yellow(`\n  ℹ Process exiting with code: ${code}`));
 });

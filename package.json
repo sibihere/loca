@@ -1,6 +1,6 @@
 {
   "name": "loca",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local Coding Agent — autonomous coding via any Ollama model",
   "type": "module",
   "scripts": {
