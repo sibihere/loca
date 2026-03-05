@@ -18,6 +18,8 @@
 import fs from "fs";
 import path from "path";
 import ignore from "ignore";
+// @ts-ignore - ignore is not always correctly typed for ESM default export
+const ignoreFactory = (ignore as any).default || ignore;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,7 +41,7 @@ export interface ContextMap {
 const DEFAULT_TOKEN_BUDGET = 800;
 
 const ALWAYS_SKIP = new Set([
-  "node_modules", ".git", "dist", "build", ".next", "out",
+  "node_modules", ".git", "dist", "build", "target", ".next", "out",
   "__pycache__", ".venv", "venv", ".cache", "coverage",
   ".turbo", ".svelte-kit", ".nuxt", ".output", "vendor",
 ]);
@@ -158,8 +160,11 @@ function extractJava(content: string, out: string[]): void {
 
 // ─── .gitignore loader ────────────────────────────────────────────────────────
 
-function loadGitignore(dir: string): ReturnType<typeof ignore> {
-  const ig = ignore();
+function loadGitignore(dir: string, extraPatterns: string[] = []): any {
+  const ig = ignoreFactory();
+  if (extraPatterns.length > 0) {
+    ig.add(extraPatterns);
+  }
   const gitignorePath = path.join(dir, ".gitignore");
   if (fs.existsSync(gitignorePath)) {
     try {
@@ -174,7 +179,7 @@ function loadGitignore(dir: string): ReturnType<typeof ignore> {
 function walkDir(
   dir: string,
   rootDir: string,
-  ig: ReturnType<typeof ignore>,
+  ig: any,
   entries: MapEntry[],
   tokenBudget: number,
   usedTokens: { count: number },
@@ -246,9 +251,10 @@ function walkDir(
 
 export function buildContextMap(
   rootDir: string,
-  tokenBudget = DEFAULT_TOKEN_BUDGET
+  tokenBudget = DEFAULT_TOKEN_BUDGET,
+  extraExcludes: string[] = []
 ): ContextMap {
-  const ig = loadGitignore(rootDir);
+  const ig = loadGitignore(rootDir, extraExcludes);
   const entries: MapEntry[] = [];
   const usedTokens = { count: 0 };
 

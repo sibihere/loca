@@ -4,6 +4,8 @@
 
 import { readFile, listDir, searchFiles, writeFile, editFile, deleteFile, createDir } from "./fs.js";
 import { runCommand, formatCommandOutput } from "./shell.js";
+import { runTests } from "./testing.js";
+import { gitStatus, gitDiff, gitAdd, gitCommit, gitBranch, gitLog } from "./git.js";
 import type { ToolCall } from "../parser.js";
 
 export interface ToolResult {
@@ -35,7 +37,7 @@ export function dispatchReadOnly(call: ToolCall): ToolResult | null {
 
 // ─── Write/execute dispatch (called AFTER user approves) ─────────────────────
 
-export function executeTool(call: ToolCall): string {
+export async function executeTool(call: ToolCall): Promise<string> {
   const p = call.params;
 
   switch (call.name) {
@@ -59,7 +61,22 @@ export function executeTool(call: ToolCall): string {
 
     case "run_command":
       if (!p.command) return "Error: run_command requires a command.";
-      return formatCommandOutput(runCommand(p.command));
+      return formatCommandOutput(await runCommand(p.command, p.working_directory));
+
+    case "run_tests":
+      return runTests(p.filter, p.working_directory);
+    case "git_status":
+      return gitStatus();
+    case "git_diff":
+      return gitDiff(p.staged === "true", p.path);
+    case "git_add":
+      return gitAdd(p.path);
+    case "git_commit":
+      return gitCommit(p.message);
+    case "git_branch":
+      return gitBranch(p.name);
+    case "git_log":
+      return gitLog(p.n ? parseInt(p.n) : 5);
 
     default:
       return `Error: Unknown tool: ${call.name}`;
@@ -79,6 +96,10 @@ export const PERMISSION_TOOLS = new Set([
   "delete_file",
   "run_command",
   "create_dir",
+  "run_tests",
+  "git_commit",
+  "git_add",
+  "git_branch",
 ]);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -18,18 +18,25 @@ export interface OllamaOptions {
   host: string;
   model: string;
   serverType: ServerType;
+  apiKey?: string;
+  basePath?: string;
 }
 
 // ─── List models ──────────────────────────────────────────────────────────────
 
 export async function listModels(
   host: string,
-  serverType: ServerType
+  serverType: ServerType,
+  apiKey?: string,
+  basePath?: string
 ): Promise<string[]> {
   const base = host.replace(/\/$/, "");
+  const headers: Record<string, string> = {};
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   if (serverType === "ollama") {
     const res = await fetch(`${base}/api/tags`, {
+      headers,
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -37,8 +44,10 @@ export async function listModels(
     return (data.models ?? []).map((m) => m.name);
   }
 
-  // openai-compatible  (/v1/models)
-  const res = await fetch(`${base}/v1/models`, {
+  // openai-compatible
+  const v1Path = basePath || "/v1";
+  const res = await fetch(`${base}${v1Path}/models`, {
+    headers,
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -72,6 +81,37 @@ export async function streamChat(
     : streamOpenAI(opts, messages, onToken);
 }
 
+export async function chat(
+  opts: OllamaOptions,
+  messages: Message[]
+): Promise<string> {
+  const url = opts.serverType === "ollama"
+    ? `${opts.host.replace(/\/$/, "")}/api/chat`
+    : `${opts.host.replace(/\/$/, "")}${opts.basePath || "/v1"}/chat/completions`;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.apiKey) headers["Authorization"] = `Bearer ${opts.apiKey}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: opts.model, messages, stream: false }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Server error ${res.status}: ${text}`);
+  }
+
+  const data = await res.json() as any;
+  if (opts.serverType === "ollama") {
+    return data.message?.content ?? "";
+  } else {
+    return data.choices?.[0]?.message?.content ?? "";
+  }
+}
+
 // ─── Ollama streaming (/api/chat — NDJSON) ────────────────────────────────────
 
 async function streamOllama(
@@ -80,10 +120,12 @@ async function streamOllama(
   onToken: (token: string) => void
 ): Promise<string> {
   const url = `${opts.host.replace(/\/$/, "")}/api/chat`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.apiKey) headers["Authorization"] = `Bearer ${opts.apiKey}`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(120_000),
   });
@@ -110,11 +152,14 @@ async function streamOpenAI(
   messages: Message[],
   onToken: (token: string) => void
 ): Promise<string> {
-  const url = `${opts.host.replace(/\/$/, "")}/v1/chat/completions`;
+  const v1Path = opts.basePath || "/v1";
+  const url = `${opts.host.replace(/\/$/, "")}${v1Path}/chat/completions`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.apiKey) headers["Authorization"] = `Bearer ${opts.apiKey}`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(12000_000),
   });

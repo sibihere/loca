@@ -20,7 +20,14 @@ export type ToolName =
   | "delete_file"
   | "run_command"
   | "create_dir"
-  | "search_files";
+  | "search_files"
+  | "run_tests"
+  | "git_status"
+  | "git_diff"
+  | "git_add"
+  | "git_commit"
+  | "git_branch"
+  | "git_log";
 
 export interface ToolCall {
   name: ToolName;
@@ -41,21 +48,21 @@ function extractTag(xml: string, tag: string): string | undefined {
 function extractTagRobust(xml: string, tag: string): string | undefined {
   const openRe = new RegExp(`<${tag}(?:\\s[^>]*)?>`, "gi");
   const closeRe = new RegExp(`</${tag}>`, "gi");
-  
+
   const openMatch = openRe.exec(xml);
   if (!openMatch) return undefined;
-  
+
   const openIndex = openMatch.index + openMatch[0].length;
-  
+
   // Find all closing tags and use the last one
   let lastCloseIndex = -1;
   let closeMatch: RegExpExecArray | null;
   while ((closeMatch = closeRe.exec(xml)) !== null) {
     lastCloseIndex = closeMatch.index;
   }
-  
+
   if (lastCloseIndex === -1 || lastCloseIndex <= openIndex) return undefined;
-  
+
   return xml.slice(openIndex, lastCloseIndex).trim();
 }
 
@@ -83,6 +90,13 @@ export function parseToolCall(text: string): ToolCall | "done" | null {
     "run_command",
     "create_dir",
     "search_files",
+    "run_tests",
+    "git_status",
+    "git_diff",
+    "git_add",
+    "git_commit",
+    "git_branch",
+    "git_log",
   ];
 
   if (!validNames.includes(name as ToolName)) {

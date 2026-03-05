@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import chalk from "chalk";
 import { parse, stringify } from "smol-toml";
 import type { ProxyConfig } from "./proxy.js";
 
@@ -13,9 +14,18 @@ export interface Config {
     host: string;
     model: string;
     serverType: ServerType;
+    apiKey?: string;
+    basePath?: string;
   };
-  // Password is NEVER saved — only url/username persisted
-  proxy?: Omit<ProxyConfig, "password">;
+  proxy?: ProxyConfig;
+  project?: ProjectConfig;
+}
+
+export interface ProjectConfig {
+  model?: string;
+  exclude?: string[];
+  autoApprove?: boolean;
+  mapBudget?: number;
 }
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
@@ -57,6 +67,7 @@ export function saveConfig(config: Config): void {
   // Strip password before saving (safety guard — should never be on Config)
   const safe = JSON.parse(JSON.stringify(config));
   if (safe.proxy) delete safe.proxy.password;
+  if (safe.connection) delete safe.connection.apiKey; // Never persist API keys
   const tomlString = stringify(safe as Record<string, unknown>);
   fs.writeFileSync(getConfigPath(), tomlString, "utf-8");
 }
@@ -64,4 +75,20 @@ export function saveConfig(config: Config): void {
 export function clearConfig(): void {
   const p = getConfigPath();
   if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+
+/**
+ * Loads project-specific config from .loca.toml in the working directory.
+ */
+export function loadProjectConfig(cwd: string): ProjectConfig | null {
+  const p = path.join(cwd, ".loca.toml");
+  if (!fs.existsSync(p)) return null;
+
+  try {
+    const content = fs.readFileSync(p, "utf-8");
+    return parse(content) as ProjectConfig;
+  } catch (err) {
+    console.error(chalk.red(`  Error parsing .loca.toml: ${err instanceof Error ? err.message : String(err)}`));
+    return null;
+  }
 }

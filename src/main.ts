@@ -5,13 +5,14 @@
 import readline from "readline";
 import path from "path";
 import chalk from "chalk";
-import { loadConfig, clearConfig, type Config } from "./config.js";
+import { loadConfig, clearConfig, loadProjectConfig, type Config } from "./config.js";
 import { runWizard, runProxyWizard } from "./wizard.js";
 import { Agent } from "./agent.js";
 import { listModels } from "./ollama.js";
 import {
   applyProxy, clearProxy, printProxyStatus, proxyFromEnv, type ProxyConfig,
 } from "./proxy.js";
+import { clearSessions } from "./session.js";
 import {
   saveSession, loadLatestSession, loadSession, listSessions,
 } from "./session.js";
@@ -39,15 +40,15 @@ function parseArgs(argv: string[]): CliArgs {
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case "--connect":   case "-c":  result.forceConnect = true; break;
-      case "--host":                  result.host  = args[++i] ?? null; break;
-      case "--model":                 result.model = args[++i] ?? null; break;
-      case "--help":      case "-h":  result.help = true; break;
-      case "--resume":    case "-r":  result.resume = true; break;
-      case "--session":               result.sessionFile = args[++i] ?? null; break;
-      case "--context":               result.contextFiles.push(args[++i] ?? ""); break;
-      case "--auto":                  result.auto = true; break;
-      case "--no-map":                result.noMap = true; break;
+      case "--connect": case "-c": result.forceConnect = true; break;
+      case "--host": result.host = args[++i] ?? null; break;
+      case "--model": result.model = args[++i] ?? null; break;
+      case "--help": case "-h": result.help = true; break;
+      case "--resume": case "-r": result.resume = true; break;
+      case "--session": result.sessionFile = args[++i] ?? null; break;
+      case "--context": result.contextFiles.push(args[++i] ?? ""); break;
+      case "--auto": result.auto = true; break;
+      case "--no-map": result.noMap = true; break;
       case "--reset":
         clearConfig();
         console.log(chalk.green("Config cleared."));
@@ -89,6 +90,7 @@ ${chalk.bold("In-session commands:")}
   ${chalk.cyan("/session save")}                     Save current conversation
   ${chalk.cyan("/session list")}                     List saved sessions
   ${chalk.cyan("/session load <file>")}              Load a saved session
+  ${chalk.cyan("/session clear")}                    Clear all saved sessions
   ${chalk.cyan("/proxy")}                            Show proxy status
   ${chalk.cyan("/proxy set <url>")}                  Set proxy URL for this session
   ${chalk.cyan("/proxy auth")}                       Re-enter proxy credentials
@@ -151,11 +153,15 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
       host: config.connection.host,
       model: config.connection.model,
       serverType: config.connection.serverType,
+      apiKey: config.connection.apiKey,
+      basePath: config.connection.basePath,
     },
     workDir: process.cwd(),
     contextFiles: args.contextFiles,
     mapEnabled: !args.noMap,
-    autoApprove: args.auto,
+    autoApprove: args.auto || config.project?.autoApprove || false,
+    mapBudget: config.project?.mapBudget,
+    excludePatterns: config.project?.exclude,
   });
 
   // Restore session if requested
@@ -286,7 +292,8 @@ async function handleCommand(
       if (!rest) {
         console.log(chalk.dim("  Fetching models...\n"));
         try {
-          const models = await listModels(config.connection.host, config.connection.serverType);
+          const { apiKey, basePath } = config.connection;
+          const models = await listModels(config.connection.host, config.connection.serverType, apiKey, basePath);
           models.forEach((m, i) => console.log(`  ${chalk.cyan(String(i + 1))}. ${m}`));
           console.log(chalk.dim("\n  Use /model <name> to switch."));
         } catch {
@@ -406,6 +413,15 @@ async function handleSessionCommand(
       break;
     }
 
+    case "clear": {
+      const result = clearSessions();
+      if (result.deletedCount > 0) {
+        console.log(chalk.green(`  ✓ Cleared ${result.deletedCount} session(s).`));
+      } else {
+        console.log(chalk.dim("  No sessions to clear."));
+      }
+      break;
+    }
     default:
       console.log(chalk.yellow("  Usage: /session [save | list | load <file>]"));
   }
@@ -471,11 +487,29 @@ async function main(): Promise<void> {
     const saved = loadConfig();
     if (saved) {
       config = saved;
-      if (args.host)  config.connection.host  = args.host;
+      if (args.host) config.connection.host = args.host;
       if (args.model) config.connection.model = args.model;
     } else {
       config = await runWizard();
     }
+  }
+
+  // Support environment overrides for API key and Base Path
+  if (process.env.LOCA_API_KEY) {
+    config.connection.apiKey = process.env.LOCA_API_KEY;
+  }
+  if (process.env.LOCA_BASE_PATH) {
+    config.connection.basePath = process.env.LOCA_BASE_PATH;
+  }
+
+  // Load and merge Project Config (.loca.toml)
+  const projectConfig = loadProjectConfig(process.cwd());
+  if (projectConfig) {
+    config.project = projectConfig;
+    if (projectConfig.model && !args.model && !args.host) {
+      config.connection.model = projectConfig.model;
+    }
+    console.log(chalk.dim("  ℹ Project configuration loaded (.loca.toml)"));
   }
 
   await startRepl(config, args);

@@ -133,3 +133,30 @@ export function pruneOldSessions(): void {
     } catch { /* ignore */ }
   }
 }
+
+// ─── Clear all sessions ───────────────────────────────────────────────────────
+
+export interface ClearSessionResult {
+  deletedCount: number;
+  error?: string;
+}
+
+export function clearSessions(): ClearSessionResult {
+  const dir = getSessionDir();
+  if (!fs.existsSync(dir)) return { deletedCount: 0 };
+
+  try {
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+    let deletedCount = 0;
+    
+    for (const f of files) {
+      try {
+        fs.unlinkSync(path.join(dir, f));
+        deletedCount++;
+      } catch { /* ignore individual failures */ }
+    }
+    return { deletedCount };
+  } catch (e) {
+    return { deletedCount: 0, error: e instanceof Error ? e.message : String(e) };
+  }
+}

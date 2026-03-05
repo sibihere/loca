@@ -2,8 +2,11 @@
 // run_command: execute a shell command in the current working directory.
 // Always requires user permission (handled by the agent before calling here).
 
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
+import { ensureInsideWorkspace } from "../utils/paths.js";
 import chalk from "chalk";
+
+let _cachedShell: string | null = null;
 
 export interface CommandResult {
   stdout: string;
@@ -13,52 +16,86 @@ export interface CommandResult {
 
 // ─── run_command ──────────────────────────────────────────────────────────────
 
-export function runCommand(command: string): string {
+export async function runCommand(
+  command: string,
+  workingDirectory?: string
+): Promise<string> {
+  if (workingDirectory) {
+    try {
+      ensureInsideWorkspace(workingDirectory);
+    } catch (err: unknown) {
+      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
   const shell = resolveShell();
+  const cwd = workingDirectory ? (workingDirectory.startsWith(".") ? workingDirectory : workingDirectory) : process.cwd();
 
-  try {
-    const stdout = execSync(command, {
-      shell,
-      timeout: 30_000,     // 30 second timeout
-      maxBuffer: 1024 * 512, // 512 KB output cap
-      cwd: process.cwd(),
-      env: process.env,
-    });
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let child;
 
-    const out = stdout.toString("utf-8").trim();
-    return out || "(command exited with no output)";
-  } catch (err: unknown) {
-    // execSync throws when exit code != 0
-    if (isExecError(err)) {
-      const stdout = (err.stdout?.toString("utf-8") ?? "").trim();
-      const stderr = (err.stderr?.toString("utf-8") ?? "").trim();
-      const code = err.status ?? 1;
-
-      const parts: string[] = [`Exit code: ${code}`];
-      if (stdout) parts.push(`stdout:\n${stdout}`);
-      if (stderr) parts.push(`stderr:\n${stderr}`);
-      return parts.join("\n");
+    try {
+      child = spawn(command, {
+        shell,
+        cwd,
+        env: process.env,
+        timeout: 120_000, // Phase 2: increased to 120s
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      resolve(`Error starting command: ${msg}`);
+      return;
     }
 
-    const msg = err instanceof Error ? err.message : String(err);
-    return `Error running command: ${msg}`;
-  }
+    child.stdout?.on("data", (data) => {
+      stdout += data.toString();
+      if (stdout.length > 1024 * 1024 * 2) { // 2MB cap
+        child.kill();
+      }
+    });
+
+    child.stderr?.on("data", (data) => {
+      stderr += data.toString();
+      if (stderr.length > 1024 * 1024 * 2) { // 2MB cap
+        child.kill();
+      }
+    });
+
+    child.on("error", (err) => {
+      resolve(`Error: ${err.message}`);
+    });
+
+    child.on("close", (code) => {
+      const out = stdout.trim();
+      if (code === 0) {
+        resolve(out || "(command exited with no output)");
+      } else {
+        const parts: string[] = [`Exit code: ${code ?? 1}`];
+        if (out) parts.push(`stdout:\n${out}`);
+        if (stderr.trim()) parts.push(`stderr:\n${stderr.trim()}`);
+        resolve(parts.join("\n"));
+      }
+    });
+  });
 }
 
 // ─── Resolve platform shell ───────────────────────────────────────────────────
 
 function resolveShell(): string {
+  if (_cachedShell) return _cachedShell;
+
   if (process.platform === "win32") {
-    // Prefer PowerShell 7 if available, fallback to cmd
     try {
       execSync("pwsh --version", { stdio: "ignore", timeout: 2000 });
-      return "pwsh";
+      _cachedShell = "pwsh";
     } catch {
-      return "cmd";
+      _cachedShell = "cmd";
     }
+  } else {
+    _cachedShell = process.env.SHELL ?? "/bin/sh";
   }
-  // Unix: use $SHELL or fallback to /bin/sh
-  return process.env.SHELL ?? "/bin/sh";
+  return _cachedShell;
 }
 
 // ─── Type guard for execSync errors ──────────────────────────────────────────

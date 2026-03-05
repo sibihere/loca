@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import chalk from "chalk";
-import { streamChat, type Message, type OllamaOptions } from "./ollama.js";
+import { streamChat, chat, type Message, type OllamaOptions } from "./ollama.js";
 import { parseToolCall, hasToolCall } from "./parser.js";
 import { dispatchReadOnly, executeTool, PERMISSION_TOOLS, UNDOABLE_TOOLS } from "./tools/index.js";
 import { askPermission, snapshotForUndo, undoLast } from "./permissions.js";
@@ -23,9 +23,10 @@ import {
 
 const MAX_RETRIES = 3;
 // Warn when estimated tokens exceed this fraction of a conservative 8k context window
-const TOKEN_WARN_THRESHOLD = 6000;
+// (Can be overridden via AgentOptions)
+const DEFAULT_TOKEN_WARN_THRESHOLD = 6000;
 // When over limit, compress: keep system prompt + last N turns
-const COMPRESSION_KEEP_TURNS = 10;
+const DEFAULT_COMPRESSION_KEEP_TURNS = 10;
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,9 @@ export interface AgentOptions {
   mapBudget?: number;       // token budget for context map (default: 800)
   mapEnabled?: boolean;     // whether to inject context map (default: true)
   autoApprove?: boolean;    // skip permission prompts (default: false)
+  excludePatterns?: string[]; // custom patterns to skip in context map
+  tokenThreshold?: number;  // when to trigger compression
+  keepTurns?: number;       // how many turns to keep when compressing
 }
 
 export class Agent {
@@ -47,6 +51,9 @@ export class Agent {
   private mapBudget: number;
   private mapEnabled: boolean;
   private autoApprove: boolean;
+  private excludePatterns: string[];
+  private tokenThreshold: number;
+  private keepTurns: number;
   private contextMap: ContextMap | null = null;
   private retryCount = 0;
 
@@ -57,6 +64,9 @@ export class Agent {
     this.mapBudget = options.mapBudget ?? 800;
     this.mapEnabled = options.mapEnabled ?? true;
     this.autoApprove = options.autoApprove ?? false;
+    this.excludePatterns = options.excludePatterns ?? [];
+    this.tokenThreshold = options.tokenThreshold ?? DEFAULT_TOKEN_WARN_THRESHOLD;
+    this.keepTurns = options.keepTurns ?? DEFAULT_COMPRESSION_KEEP_TURNS;
 
     // Load context files content
     this.loadContextFileContents();
@@ -93,7 +103,9 @@ export class Agent {
 
   rebuildMap(): void {
     try {
-      this.contextMap = buildContextMap(this.workDir, this.mapBudget);
+      if (this.mapEnabled) {
+        this.contextMap = buildContextMap(this.workDir, this.mapBudget, this.excludePatterns);
+      }
       this.resetSystemPrompt();
     } catch { /* non-fatal */ }
   }
@@ -213,48 +225,64 @@ export class Agent {
   async run(userMessage: string, rl?: readline.Interface): Promise<void> {
     this.history.push({ role: "user", content: userMessage });
     this.retryCount = 0;
-    this.checkTokenWarning();
+    await this.checkTokenWarning();
     await this.loop(rl);
   }
 
   // ─── Token warning + context compression ─────────────────────────────────
 
-  private checkTokenWarning(): void {
+  private async checkTokenWarning(): Promise<void> {
     const approx = this.estimateTokens();
-    if (approx > TOKEN_WARN_THRESHOLD) {
+    if (approx > this.tokenThreshold) {
       console.log(
         chalk.yellow(`\n  ⚠ Context is large (~${approx} tokens). `) +
-        chalk.dim("Older messages will be compressed automatically.\n")
+        chalk.dim("Older messages will be summarized to save context space.\n")
       );
-      this.compressHistory();
+      await this.compressHistory();
     }
   }
 
-  private compressHistory(): void {
+  private async compressHistory(): Promise<void> {
     const system = this.history[0];
     const nonSystem = this.history.slice(1);
 
-    if (nonSystem.length <= COMPRESSION_KEEP_TURNS * 2) return;
+    if (nonSystem.length <= this.keepTurns * 2) return;
 
-    // Keep last N turns (each turn = user + assistant = 2 messages)
-    const keep = nonSystem.slice(-(COMPRESSION_KEEP_TURNS * 2));
+    // Keep last N turns
+    const keep = nonSystem.slice(-(this.keepTurns * 2));
+    const toSummarize = nonSystem.slice(0, nonSystem.length - keep.length);
 
-    // Build a brief summary of what was dropped
-    const dropped = nonSystem.slice(0, nonSystem.length - keep.length);
-    const droppedSummary =
-      `[Earlier conversation (${Math.floor(dropped.length / 2)} turns) was compressed to save context space.]`;
+    process.stdout.write(chalk.dim("  Summarizing earlier turns..."));
 
-    this.history = [
-      system,
-      { role: "user", content: droppedSummary },
-      { role: "assistant", content: "Understood. I'll continue from the recent context." },
-      ...keep,
-    ];
+    try {
+      const summaryPrompt = [
+        { role: "system" as const, content: "You are a concise assistant. Provide a very brief, high-level summary of the following conversation turns so the assistant can maintain context. Focus on key decisions, task status, and important discoveries." },
+        { role: "user" as const, content: JSON.stringify(toSummarize) },
+      ];
+
+      const summary = await chat(this.opts, summaryPrompt);
+      const summaryMessage = `[Summary of earlier conversation: ${summary}]`;
+
+      this.history = [
+        system,
+        { role: "assistant", content: summaryMessage },
+        ...keep,
+      ];
+      console.log(chalk.green(" ✓\n"));
+    } catch (err) {
+      // Fallback to simple truncation if summarization fails
+      console.log(chalk.yellow(" ✗ (failed, falling back to truncation)\n"));
+      this.history = [
+        system,
+        { role: "user", content: "[Earlier conversation truncated to save space.]" },
+        ...keep,
+      ];
+    }
   }
 
   private estimateTokens(): number {
     return this.history
-      .map((m) => Math.ceil(m.content.length / 4))
+      .map((m) => Math.ceil(m.content.length / 4) + 12) // +12 for role/formatting overhead
       .reduce((a, b) => a + b, 0);
   }
 
@@ -385,7 +413,7 @@ export class Agent {
         snapshotForUndo(parsed.name, parsed.params.path);
       }
 
-      const output = executeTool(parsed);
+      const output = await executeTool(parsed);
       const isError = output.startsWith("Error:");
 
       if (isError) {
@@ -436,7 +464,7 @@ export class Agent {
   status(): void {
     const turns = this.history.filter((m) => m.role !== "system").length;
     const approxTokens = this.estimateTokens();
-    const tokenColor = approxTokens > TOKEN_WARN_THRESHOLD ? chalk.yellow : chalk.green;
+    const tokenColor = approxTokens > this.tokenThreshold ? chalk.yellow : chalk.green;
     const mapStatus = !this.mapEnabled
       ? chalk.dim("off")
       : this.contextMap

@@ -79,12 +79,47 @@ create_dir(path)
 delete_file(path)
   Delete a file. Requires user approval.
 
-run_command(command)
-  Execute a shell command. Requires user approval.
+git_status()
+  Show working tree status.
+  Example: <tool><n>git_status</n></tool>
+
+git_diff(staged, path)
+  Show changes. Set 'staged' to "true" to see staged changes. 'path' is optional to view specific files.
+  Example: <tool><n>git_diff</n><staged>false</staged><path>src/main.ts</path></tool>
+
+git_add(path)
+  Stage changes. Use "." to stage all changes.
+  Example: <tool><n>git_add</n><path>src/file.ts</path></tool>
+
+git_commit(message)
+  Commit staged changes.
+  Example: <tool><n>git_commit</n><message>feat: add new feature</message></tool>
+
+git_branch(name)
+  Create a new branch.
+  Example: <tool><n>git_branch</n><name>my-new-feature</name></tool>
+
+git_log(n)
+  Show recent commits. 'n' is optional, default 5.
+  Example: <tool><n>git_log</n><n>3</n></tool>
+
+run_tests(filter)
+  Auto-detect and run the project's test suite.
+  Example: <tool><n>run_tests</n><filter>src/utils</filter></tool>
+
+run_command(command, working_directory)
+  Execute a shell command in the current workspace. Use this for testing, building, or searching.
+  Example: <tool><n>run_command</n><command>npm test</command><working_directory>src</working_directory></tool>
 
 ## Format Rules
 
 - When calling a tool, output ONLY a <tool> block. No text after the block.
+# GIT WORKFLOW
+- When asked to commit changes, first use \`git_status\` and \`git_diff\`.
+- CRITICAL: If the output is "Working tree clean. No uncommitted changes." or "No changes found.", you MUST immediately output <done/>. Do not keep checking status or diffs.
+- If a diff is too large and gets truncated, use \`git_diff\` again with the \`path\` parameter to view specific files.
+- Use \`git_add\` to stage the specific files you want to commit.
+- Use \`git_commit\` with a concise, conventional commit message.
 - You MAY write a brief thought BEFORE the tool block (1-2 sentences max).
 - After the tool block, stop and wait for the result before continuing.
 - Use <done/> only when the entire task is completely finished.

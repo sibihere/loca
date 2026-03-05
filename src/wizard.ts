@@ -106,9 +106,9 @@ interface ServerProfile {
 }
 
 const SERVER_PROFILES: ServerProfile[] = [
-  { type: "ollama",            label: "Ollama",             hint: "local or remote Ollama server",       defaultPort: 11434, defaultHost: "http://localhost:11434" },
-  { type: "openai-compatible", label: "LM Studio",          hint: "LM Studio local server",              defaultPort: 1234,  defaultHost: "http://localhost:1234"  },
-  { type: "openai-compatible", label: "OpenAI-compatible",  hint: "llama.cpp, Jan, Msty, vLLM, etc.",   defaultPort: 8080,  defaultHost: "http://localhost:8080"  },
+  { type: "ollama", label: "Ollama", hint: "local or remote Ollama server", defaultPort: 11434, defaultHost: "http://localhost:11434" },
+  { type: "openai-compatible", label: "LM Studio", hint: "LM Studio local server", defaultPort: 1234, defaultHost: "http://localhost:1234" },
+  { type: "openai-compatible", label: "OpenAI-compatible", hint: "llama.cpp, Jan, Msty, vLLM, etc.", defaultPort: 8080, defaultHost: "http://localhost:8080" },
 ];
 
 // ─── Proxy wizard (standalone — can be called from /proxy connect) ────────────
@@ -178,15 +178,28 @@ export async function runWizard(): Promise<Config> {
   console.log();
 
   let host = "";
+  let apiKey: string | undefined;
+  let basePath: string | undefined;
   let models: string[] = [];
   let proxyConfigured = !!envProxy;
 
   while (true) {
     host = (await ask("Host", profile.defaultHost)).replace(/\/$/, "");
+
+    if (profile.type === "openai-compatible") {
+      basePath = await ask("API Base Path (e.g. /v1, /v1/chat)", "/v1");
+      if (basePath === "/v1") basePath = undefined;
+    }
+
+    const needsAuth = await askYN("Does this server require an API key (Bearer token)?", false);
+    if (needsAuth) {
+      apiKey = await askPassword("API Key");
+    }
+
     process.stdout.write(chalk.dim(`\n  Connecting to ${host} ...`));
 
     try {
-      models = await listModels(host, profile.type);
+      models = await listModels(host, profile.type, apiKey, basePath);
       process.stdout.write(chalk.green(" ✓\n\n"));
       break;
     } catch (err: unknown) {
@@ -245,7 +258,15 @@ export async function runWizard(): Promise<Config> {
   // ── Step 5: Save? ─────────────────────────────────────────────────────────
   const save = await askYN("Save these settings for next time?", true);
 
-  const config: Config = { connection: { host, model, serverType: profile.type } };
+  const config: Config = {
+    connection: {
+      host,
+      model,
+      serverType: profile.type,
+      apiKey,
+      basePath,
+    },
+  };
   if (save) {
     saveConfig(config);
     console.log(chalk.dim("  Settings saved."));

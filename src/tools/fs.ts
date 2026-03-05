@@ -8,6 +8,7 @@
 import fs from "fs";
 import path from "path";
 import { applyPatch } from "diff";
+import { ensureInsideWorkspace } from "../utils/paths.js";
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -20,7 +21,12 @@ export const SKIP_DIRS = new Set([
 // ─── read_file ────────────────────────────────────────────────────────────────
 
 export function readFile(filePath: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(filePath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 
   if (!fs.existsSync(resolved)) return `Error: File not found: ${filePath}`;
 
@@ -52,7 +58,12 @@ export function readFile(filePath: string): string {
 // ─── list_dir ─────────────────────────────────────────────────────────────────
 
 export function listDir(dirPath: string, indent = 0): string {
-  const resolved = path.resolve(dirPath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(dirPath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 
   if (!fs.existsSync(resolved)) return `Error: Directory not found: ${dirPath}`;
 
@@ -110,7 +121,12 @@ function listDirFlat(dirPath: string, indent: number): string {
 // ─── write_file ───────────────────────────────────────────────────────────────
 
 export function writeFile(filePath: string, content: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(filePath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, "utf-8");
@@ -123,7 +139,12 @@ export function writeFile(filePath: string, content: string): string {
 // ─── edit_file ────────────────────────────────────────────────────────────────
 
 export function editFile(filePath: string, diff: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(filePath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 
   if (!fs.existsSync(resolved)) {
     return `Error: File not found: ${filePath}. Use write_file to create it.`;
@@ -217,7 +238,12 @@ function recalibrateDiff(diff: string): string {
 // ─── delete_file ──────────────────────────────────────────────────────────────
 
 export function deleteFile(filePath: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(filePath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 
   if (!fs.existsSync(resolved)) return `Error: File not found: ${filePath}`;
 
@@ -237,7 +263,12 @@ export function deleteFile(filePath: string): string {
 // ─── create_dir ───────────────────────────────────────────────────────────────
 
 export function createDir(dirPath: string): string {
-  const resolved = path.resolve(dirPath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(dirPath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
   try {
     fs.mkdirSync(resolved, { recursive: true });
     return `Created directory: ${dirPath}`;
@@ -249,7 +280,12 @@ export function createDir(dirPath: string): string {
 // ─── search_files ─────────────────────────────────────────────────────────────
 
 export function searchFiles(pattern: string, dirPath: string): string {
-  const resolved = path.resolve(dirPath);
+  let resolved: string;
+  try {
+    resolved = ensureInsideWorkspace(dirPath);
+  } catch (err: unknown) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
   if (!fs.existsSync(resolved)) return `Error: Directory not found: ${dirPath}`;
 
   let regex: RegExp;
