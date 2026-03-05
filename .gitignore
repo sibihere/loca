@@ -1,3 +1,12 @@
 /node_modules/
 /.idea/
 /loca.iml
+
+# Sensitive files that should not be committed
+.env*
+*.pem
+*.key
+*.secret
+
+# Local configuration (user-specific)
+.loca.toml

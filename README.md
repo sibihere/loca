@@ -195,10 +195,3 @@ Sessions are saved alongside config in the `sessions/` subdirectory.
 Undo snapshots are in `undo/`. Neither passwords nor secrets are ever written to these files.
 
 ---
-
-## Phase status
-
-- ✅ Phase 1 — Connection wizard, Ollama + OpenAI-compatible streaming, read tools, REPL
-- ✅ Phase 2 — Proxy support, write/edit/delete tools, permission gate, undo stack
-- ✅ Phase 3 — Context map, session save/resume, auto-approve, token compression, `--context` flag
-- 🔜 Phase 4 — Tests, robustness hardening, npm packaging

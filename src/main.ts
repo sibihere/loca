@@ -17,6 +17,7 @@ import { clearSessions } from "./session.js";
 import {
   saveSession, loadLatestSession, loadSession, listSessions,
 } from "./session.js";
+import { loadHistory, addToHistory, pruneHistory } from "./history.js";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -246,6 +247,12 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
     terminal: true,
   });
 
+  // Load persistent history
+  const history = loadHistory();
+  if (history.length > 0) {
+    (rl as any).history = [...history].reverse();
+  }
+
   const handleInput = async (line: string) => {
     const input = line.trim();
     if (!input) {
@@ -258,6 +265,8 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
       rl.prompt();
       return;
     }
+
+    addToHistory(input);
 
     rl.pause();
     try {
@@ -341,6 +350,7 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
       console.log(chalk.dim(`\n  Session saved: ${path.basename(file)}`));
     }
     console.log(chalk.dim("  Bye!\n"));
+    pruneHistory();
     process.exit(0);
   });
 
