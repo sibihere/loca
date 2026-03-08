@@ -1,3 +1,5 @@
+![loca banner](assets/banner.png)
+
 # loca — Local Coding Agent
 
 An autonomous coding agent that talks to any Ollama or OpenAI-compatible model —

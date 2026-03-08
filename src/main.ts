@@ -18,6 +18,7 @@ import {
   saveSession, loadLatestSession, loadSession, listSessions,
 } from "./session.js";
 import { loadHistory, addToHistory, pruneHistory } from "./history.js";
+import { printBanner } from "./banner.js";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ function parseArgs(argv: string[]): CliArgs {
 
 function printHelp(): void {
   console.log(`
-${chalk.bold.cyan("loca")} — Local Coding Agent  v0.3.5
+${chalk.bold.cyan("loca")} — Local Coding Agent
 
 ${chalk.bold("Usage:")}
   npm start                            Launch (wizard on first run, saved config after)
@@ -224,14 +225,6 @@ async function startRepl(config: Config, args: CliArgs): Promise<void> {
     }
   }
 
-  console.log();
-  console.log(
-    chalk.bold("  ✓") +
-    chalk.dim(` ${config.connection.host}`) +
-    chalk.dim("  |  ") + chalk.dim(config.connection.serverType) +
-    chalk.dim("  |  ") + chalk.cyan(config.connection.model) +
-    chalk.dim("  |  ") + chalk.yellow("v0.3.5")
-  );
   if (args.auto) console.log(chalk.yellow("  ⚡ Auto-approve is ON"));
   console.log(chalk.dim("  Type a task, or /help for commands. Ctrl+C to quit.\n"));
 
@@ -640,6 +633,7 @@ async function main(): Promise<void> {
     console.log(chalk.dim("  ℹ Project configuration loaded (.loca.toml)"));
   }
 
+  printBanner(config);
   await startRepl(config, args);
 }
 
