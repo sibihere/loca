@@ -11,7 +11,7 @@ import { Agent } from "./agent.js";
 import { listModels } from "./ollama.js";
 import { search } from "@inquirer/prompts";
 import {
-  applyProxy, clearProxy, printProxyStatus, proxyFromEnv, type ProxyConfig,
+  applyProxy, clearProxy, printProxyStatus, proxyFromEnv, setAllowInsecure, type ProxyConfig,
 } from "./proxy.js";
 import { clearSessions } from "./session.js";
 import {
@@ -32,6 +32,7 @@ interface CliArgs {
   contextFiles: string[];
   auto: boolean;
   noMap: boolean;
+  insecure: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -39,6 +40,7 @@ function parseArgs(argv: string[]): CliArgs {
   const result: CliArgs = {
     forceConnect: false, host: null, model: null, help: false,
     resume: false, sessionFile: null, contextFiles: [], auto: false, noMap: false,
+    insecure: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -52,6 +54,7 @@ function parseArgs(argv: string[]): CliArgs {
       case "--context": result.contextFiles.push(args[++i] ?? ""); break;
       case "--auto": result.auto = true; break;
       case "--no-map": result.noMap = true; break;
+      case "--insecure": result.insecure = true; break;
       case "--reset":
         clearConfig();
         console.log(chalk.green("Config cleared."));
@@ -78,6 +81,7 @@ ${chalk.bold("Usage:")}
   npm start -- --auto                  Start with auto-approve enabled
   npm start -- --no-map                Start without building context map
   npm start -- --reset                 Clear saved config
+  npm start -- --insecure              Disable SSL certificate verification
 
 ${chalk.bold("In-session commands:")}
   ${chalk.cyan("/connect")}                          Re-run connection + proxy wizard
@@ -622,6 +626,12 @@ async function main(): Promise<void> {
   if (process.env.LOCA_BASE_PATH) {
     config.connection.basePath = process.env.LOCA_BASE_PATH;
   }
+
+  // Handle insecure flag
+  if (args.insecure) {
+    config.connection.allowInsecure = true;
+  }
+  setAllowInsecure(!!config.connection.allowInsecure);
 
   // Load and merge Project Config (.loca.toml)
   const projectConfig = loadProjectConfig(process.cwd());

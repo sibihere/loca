@@ -25,10 +25,12 @@ export interface ProxyConfig {
 // ─── Module-level state ───────────────────────────────────────────────────────
 
 let _activeProxy: ProxyConfig | null = null;
+let _allowInsecure = false;
 
 // ─── Apply proxy to global fetch dispatcher ───────────────────────────────────
 
 export function applyProxy(cfg: ProxyConfig): void {
+  const connect = { rejectUnauthorized: !_allowInsecure };
   if (!cfg.enabled || !cfg.url) {
     clearProxy();
     return;
@@ -50,7 +52,7 @@ export function applyProxy(cfg: ProxyConfig): void {
   }
 
   try {
-    const agent = new ProxyAgent({ uri });
+    const agent = new ProxyAgent({ uri, connect });
     setGlobalDispatcher(agent);
     _activeProxy = cfg;
   } catch (err: unknown) {
@@ -63,8 +65,21 @@ export function applyProxy(cfg: ProxyConfig): void {
 
 export function clearProxy(): void {
   // Reset to undici's default Agent (direct connections)
-  setGlobalDispatcher(new Agent());
+  setGlobalDispatcher(new Agent({ connect: { rejectUnauthorized: !_allowInsecure } }));
   _activeProxy = null;
+}
+
+/**
+ * Toggles global SSL certificate verification.
+ */
+export function setAllowInsecure(value: boolean): void {
+  _allowInsecure = value;
+  // Refresh the dispatcher (proxy agent or direct agent)
+  if (_activeProxy) {
+    applyProxy(_activeProxy);
+  } else {
+    clearProxy();
+  }
 }
 
 // ─── Get current proxy state (for /status and /proxy commands) ───────────────
@@ -135,5 +150,7 @@ export function printProxyStatus(): void {
       console.log(chalk.dim(`  (overrides env proxy: ${envProxy.url})`));
     }
   }
+
+  console.log(`  SSL Verify: ${!_allowInsecure ? chalk.green("enabled") : chalk.yellow("disabled (insecure)")}`);
   console.log();
 }
