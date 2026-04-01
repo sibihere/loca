@@ -16,6 +16,7 @@ export interface Config {
     serverType: ServerType;
     apiKey?: string;
     basePath?: string;
+    allowInsecure?: boolean;
   };
   proxy?: ProxyConfig;
   project?: ProjectConfig;
@@ -51,6 +52,7 @@ export function loadConfig(): Config | null {
     const parsed = parse(raw) as unknown as Config;
     if (parsed?.connection?.host && parsed?.connection?.model) {
       parsed.connection.serverType ??= "ollama";
+      parsed.connection.allowInsecure ??= false;
       return parsed;
     }
     return null;

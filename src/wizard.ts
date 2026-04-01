@@ -9,7 +9,7 @@ import readline from "readline";
 import chalk from "chalk";
 import { listModels } from "./ollama.js";
 import { saveConfig, type Config, type ServerType } from "./config.js";
-import { applyProxy, proxyFromEnv, type ProxyConfig } from "./proxy.js";
+import { applyProxy, proxyFromEnv, setAllowInsecure, type ProxyConfig } from "./proxy.js";
 
 // ─── Readline helpers ─────────────────────────────────────────────────────────
 
@@ -182,6 +182,7 @@ export async function runWizard(): Promise<Config> {
   let basePath: string | undefined;
   let models: string[] = [];
   let proxyConfigured = !!envProxy;
+  let allowInsecure = false;
 
   while (true) {
     host = (await ask("Host", profile.defaultHost)).replace(/\/$/, "");
@@ -207,6 +208,25 @@ export async function runWizard(): Promise<Config> {
       process.stdout.write(chalk.red(" ✗\n\n"));
       console.log(chalk.red("  Connection failed:"), chalk.dim(msg));
       console.log();
+
+      // Detect SSL certificate errors
+      const isSslError =
+        msg.toLowerCase().includes("self signed") ||
+        msg.toLowerCase().includes("certificate") ||
+        msg.toLowerCase().includes("unable to verify") ||
+        msg.toLowerCase().includes("expired");
+
+      if (isSslError && !allowInsecure) {
+        console.log(chalk.yellow("  It looks like an SSL certificate verification failure."));
+        const disableSsl = await askYN("Disable SSL certificate verification for this connection?", true);
+        if (disableSsl) {
+          allowInsecure = true;
+          setAllowInsecure(true);
+          console.log(chalk.dim("  SSL verification disabled. Retrying...\n"));
+          continue;
+        }
+      }
+
       printConnectionHints(profile, host, proxyConfigured);
 
       // Offer proxy setup if not yet configured and it looks like a network error
@@ -265,6 +285,7 @@ export async function runWizard(): Promise<Config> {
       serverType: profile.type,
       apiKey,
       basePath,
+      allowInsecure,
     },
   };
   if (save) {
