@@ -5,9 +5,8 @@
 //   "openai-compatible"— OpenAI-style API   (/v1/models, /v1/chat/completions)
 //                        Works with: LM Studio, llama.cpp, Jan, Msty, vLLM, etc.
 
-import { fetch } from "undici";
 import type { ServerType } from "./config.js";
-import { getDispatcher } from "./proxy.js";
+import { getFetchOptions, isAllowInsecure } from "./proxy.js";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -40,9 +39,9 @@ export async function listModels(
     const res = await fetch(`${base}/api/tags`, {
       headers,
       signal: AbortSignal.timeout(8000),
-      dispatcher: getDispatcher(),
+      ...getFetchOptions(),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
     const data = (await res.json()) as { models: { name: string }[] };
     return (data.models ?? []).map((m) => m.name);
   }
@@ -52,9 +51,9 @@ export async function listModels(
   const res = await fetch(`${base}${v1Path}/models`, {
     headers,
     signal: AbortSignal.timeout(8000),
-    dispatcher: getDispatcher(),
+    ...getFetchOptions(),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
   const data = (await res.json()) as { data: { id: string }[] };
   return (data.data ?? []).map((m) => m.id);
 }
@@ -101,7 +100,7 @@ export async function chat(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: false }),
     signal: AbortSignal.timeout(60_000),
-    dispatcher: getDispatcher(),
+    ...getFetchOptions(),
   });
 
   if (!res.ok) {
@@ -133,7 +132,7 @@ async function streamOllama(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(120_000),
-    dispatcher: getDispatcher(),
+    ...getFetchOptions(),
   });
 
   if (!res.ok) {
@@ -168,7 +167,7 @@ async function streamOpenAI(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(12000_000),
-    dispatcher: getDispatcher(),
+    ...getFetchOptions(),
   });
 
   if (!res.ok) {
@@ -218,7 +217,9 @@ async function readNDJSON(
       try {
         const token = extractor(line);
         if (token) { onToken(token); full += token; }
-      } catch { /* skip malformed lines */ }
+    } catch (e) {
+        console.error("  [Stream parser error (skipped)]", e);
+    }
     }
   }
   return full;
@@ -247,7 +248,9 @@ async function readSSE(
       try {
         const token = extractor(line);
         if (token) { onToken(token); full += token; }
-      } catch { /* skip */ }
+      } catch (e) {
+          console.error("  [SSE parser error (skipped)]", e);
+      }
     }
   }
   return full;

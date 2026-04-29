@@ -94,12 +94,23 @@ export function setAllowInsecure(value: boolean): void {
 }
 
 /**
- * Returns the current global undici dispatcher.
- * Use this to explicitly pass `dispatcher` to fetch() calls, ensuring
- * the insecure/proxy agent is actually used regardless of the Node runtime.
+ * Returns options to merge into fetch() calls to guarantee standard
+ * routing and TLS verification, supporting both Node (undici dispatcher)
+ * and Bun (custom tls config).
  */
-export function getDispatcher(): Dispatcher {
-  return getGlobalDispatcher();
+export function getFetchOptions(): Record<string, any> {
+  return {
+    // For Node/undici global fetch
+    dispatcher: getGlobalDispatcher(),
+    // For Bun fetch (used in compiled executables)
+    tls: {
+      rejectUnauthorized: !_allowInsecure,
+    },
+  };
+}
+
+export function isAllowInsecure(): boolean {
+  return _allowInsecure;
 }
 
 // ─── Get current proxy state (for /status and /proxy commands) ───────────────
