@@ -9,7 +9,7 @@
 // Proxy is applied globally to Node's fetch via undici ProxyAgent.
 // This means ALL fetch() calls in the process go through the proxy automatically.
 
-import { ProxyAgent, setGlobalDispatcher, getGlobalDispatcher, Agent } from "undici";
+import { ProxyAgent, setGlobalDispatcher, getGlobalDispatcher, Agent, type Dispatcher } from "undici";
 import chalk from "chalk";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,12 +74,32 @@ export function clearProxy(): void {
  */
 export function setAllowInsecure(value: boolean): void {
   _allowInsecure = value;
+
+  // Belt-and-suspenders: set the process-level env var so Node's native TLS
+  // layer also skips certificate verification. This is essential in restricted
+  // environments (corporate proxies, SEA builds) where the undici dispatcher
+  // alone may not control the TLS handshake.
+  if (value) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  } else {
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  }
+
   // Refresh the dispatcher (proxy agent or direct agent)
   if (_activeProxy) {
     applyProxy(_activeProxy);
   } else {
     clearProxy();
   }
+}
+
+/**
+ * Returns the current global undici dispatcher.
+ * Use this to explicitly pass `dispatcher` to fetch() calls, ensuring
+ * the insecure/proxy agent is actually used regardless of the Node runtime.
+ */
+export function getDispatcher(): Dispatcher {
+  return getGlobalDispatcher();
 }
 
 // ─── Get current proxy state (for /status and /proxy commands) ───────────────

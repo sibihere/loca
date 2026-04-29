@@ -6,6 +6,7 @@
 //                        Works with: LM Studio, llama.cpp, Jan, Msty, vLLM, etc.
 
 import type { ServerType } from "./config.js";
+import { getDispatcher } from "./proxy.js";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -38,7 +39,8 @@ export async function listModels(
     const res = await fetch(`${base}/api/tags`, {
       headers,
       signal: AbortSignal.timeout(8000),
-    });
+      dispatcher: getDispatcher(),
+    } as any);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { models: { name: string }[] };
     return (data.models ?? []).map((m) => m.name);
@@ -49,7 +51,8 @@ export async function listModels(
   const res = await fetch(`${base}${v1Path}/models`, {
     headers,
     signal: AbortSignal.timeout(8000),
-  });
+    dispatcher: getDispatcher(),
+  } as any);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { data: { id: string }[] };
   return (data.data ?? []).map((m) => m.id);
@@ -97,7 +100,8 @@ export async function chat(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: false }),
     signal: AbortSignal.timeout(60_000),
-  });
+    dispatcher: getDispatcher(),
+  } as any);
 
   if (!res.ok) {
     const text = await res.text();
@@ -128,7 +132,8 @@ async function streamOllama(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(120_000),
-  });
+    dispatcher: getDispatcher(),
+  } as any);
 
   if (!res.ok) {
     const text = await res.text();
@@ -162,7 +167,8 @@ async function streamOpenAI(
     headers,
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(12000_000),
-  });
+    dispatcher: getDispatcher(),
+  } as any);
 
   if (!res.ok) {
     const text = await res.text();
