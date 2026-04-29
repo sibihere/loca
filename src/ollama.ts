@@ -5,6 +5,7 @@
 //   "openai-compatible"— OpenAI-style API   (/v1/models, /v1/chat/completions)
 //                        Works with: LM Studio, llama.cpp, Jan, Msty, vLLM, etc.
 
+import { fetch } from "undici";
 import type { ServerType } from "./config.js";
 import { getDispatcher } from "./proxy.js";
 
@@ -40,7 +41,7 @@ export async function listModels(
       headers,
       signal: AbortSignal.timeout(8000),
       dispatcher: getDispatcher(),
-    } as any);
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { models: { name: string }[] };
     return (data.models ?? []).map((m) => m.name);
@@ -52,7 +53,7 @@ export async function listModels(
     headers,
     signal: AbortSignal.timeout(8000),
     dispatcher: getDispatcher(),
-  } as any);
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = (await res.json()) as { data: { id: string }[] };
   return (data.data ?? []).map((m) => m.id);
@@ -101,7 +102,7 @@ export async function chat(
     body: JSON.stringify({ model: opts.model, messages, stream: false }),
     signal: AbortSignal.timeout(60_000),
     dispatcher: getDispatcher(),
-  } as any);
+  });
 
   if (!res.ok) {
     const text = await res.text();
@@ -133,7 +134,7 @@ async function streamOllama(
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(120_000),
     dispatcher: getDispatcher(),
-  } as any);
+  });
 
   if (!res.ok) {
     const text = await res.text();
@@ -141,7 +142,7 @@ async function streamOllama(
   }
   if (!res.body) throw new Error("No response body from Ollama");
 
-  return readNDJSON(res.body, onToken, (line) => {
+  return readNDJSON(res.body as unknown as ReadableStream<Uint8Array>, onToken, (line) => {
     const parsed = JSON.parse(line) as {
       message?: { content?: string };
       done?: boolean;
@@ -168,7 +169,7 @@ async function streamOpenAI(
     body: JSON.stringify({ model: opts.model, messages, stream: true }),
     signal: AbortSignal.timeout(12000_000),
     dispatcher: getDispatcher(),
-  } as any);
+  });
 
   if (!res.ok) {
     const text = await res.text();
@@ -176,7 +177,7 @@ async function streamOpenAI(
   }
   if (!res.body) throw new Error("No response body from server");
 
-  return readSSE(res.body, onToken, (line) => {
+  return readSSE(res.body as unknown as ReadableStream<Uint8Array>, onToken, (line) => {
     // SSE lines look like:  data: {...json...}
     // End-of-stream marker: data: [DONE]
     if (!line.startsWith("data:")) return "";
